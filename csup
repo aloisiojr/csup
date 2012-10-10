@@ -1,0 +1,107 @@
+#!/bin/bash -e
+
+function run_cscope {
+	echo -n "$OUTPUT_STR database... "
+	/usr/bin/time -f 'done! status (%x) time (%E)' cscope -bqk > /dev/null
+}
+
+function update_db {
+	local db=$1
+
+	mv cscope.files.$db cscope.files
+	test -f cscope.$db.in && mv cscope.$db.in cscope.in.out
+	test -f cscope.$db.po && mv cscope.$db.po cscope.po.out
+	test -f cscope.out.$db && mv cscope.out.$db cscope.out
+	run_cscope
+	mv cscope.out cscope.out.$db
+	test -f cscope.in.out && mv cscope.in.out cscope.out.$db.in
+	test -f cscope.po.out && mv cscope.po.out cscope.out.$db.po
+	mv cscope.files cscope.files.$db
+}
+
+function update {
+	OUTPUT_STR=Updating
+
+	if [ ! -f cscope.files.proj ] || [ ! -f cscope.files.work ] || \
+			[ ! -f cscope.out.proj ] || [ ! -f cscope.out.work ]; then
+		echo -e "ERROR: You must create the databases first!\n"
+		usage; exit 1
+	fi
+
+	update_db proj
+	update_db work
+}
+
+
+function create {
+	OUTPUT_STR=Creating
+
+	T="-path X -prune -o"
+	DIRS=""
+	for i in $@; do DIRS="$DIRS ./$i"; done
+	for i in $EXCLUDE; do DIRS="$DIRS ./$i"; done
+
+	find . `for i in $DIRS; do echo ${T/X/$i}; done` \
+			-name '*.[chxsS]' -print > cscope.files.proj
+
+	update_db proj
+
+	find $@ -name '*.[chxsS]' -print > cscope.files.work
+
+	update_db work
+}
+
+function usage {
+	echo "Usage: csup [create [--exclude DIR_PATH] --work DIR_PATH...]"
+	echo
+	echo "Helper to create/update optimized cscope databases."
+	echo
+	echo "When working on big projects (e.g. kernel) a good approach for "
+	echo "cscope management is to create two different databases. One for"
+	echo "directories that you're not going to change and another one to"
+	echo "files that you will work on."
+	echo
+	echo "Cscope and vi are prepared to work with more than one database"
+	echo "at same time to find symbols. Use their documentation to know how"
+	echo "to do such task."
+	echo
+	echo "First you need to create the databases:"
+	echo "csup create --exclude DIR1 DIR2... --work DIR3 DIR4..."
+	echo
+	echo "The files cscope.out.proj and cscope.out.work will be created,"
+	echo "they are your databases."
+	echo "The files cscope.files.proj and cscope.files.work will be created"
+	echo "also. Do not delete them, they are essential to update the"
+	echo "databases."
+	echo
+	echo "To update your databases, just type:"
+	echo "csup"
+	echo
+	echo "Example: Suppose you're working on the bluetooth subsystem in the"
+	echo "kernel project:"
+	echo "csup create --exclude Documentation samples scripts tools usr \ "
+	echo "            debian --work net/bluetooth include/net/bluetooth"
+	echo
+}
+
+if [ $# -eq 0 ]; then
+	update
+elif [ "$1" == "create" ]; then
+	shift
+	EXCLUDE=""
+	if [ "$1" == "--exclude" ]; then
+		shift
+		while [ "$1" != "--work" ]; do
+			EXCLUDE="$EXCLUDE $1"
+			shift
+		done
+	fi
+	if [ "$1" != "--work" ]; then
+		usage
+		exit 1
+	fi
+	shift
+	create $@
+else
+	usage
+fi
